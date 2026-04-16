@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 220" width="280" height="220">
+  <defs>
+    <style>
+      text { font-family: 'SF Mono', 'Cascadia Code', 'Menlo', 'Courier New', monospace; }
+    </style>
+    <clipPath id="clip">
+      <rect width="280" height="220" rx="12"/>
+    </clipPath>
+  </defs>
+
+  <rect width="280" height="220" rx="12" fill="#12121c"/>
+
+  <rect x="0" y="0" width="280" height="3" rx="0" fill="#b4b4ff" opacity="0.35"/>
+
+  <text x="16" y="26" fill="#b4b4ff" font-size="14" font-weight="bold" letter-spacing="0.5">goodo</text>
+  <text x="73" y="26" fill="#32325a" font-size="11"> 3 / 5 ✓</text>
+
+  <line x1="12" y1="36" x2="268" y2="36" stroke="#1e1e30" stroke-width="1"/>
+
+  <text x="12" y="56" fill="#3c3c60" font-size="10">──</text>
+  <text x="28" y="56" fill="#9696b9" font-size="10" font-weight="bold">tasks</text>
+  <text x="62" y="56" fill="#22223a" font-size="10">───────────────────────────────────────</text>
+
+  <rect x="12" y="62" width="256" height="16" fill="#121e12"/>
+  <text x="26" y="74" fill="#50b950" font-size="10" text-decoration="line-through">✓  finish readme</text>
+
+  <rect x="12" y="78" width="256" height="16" fill="#373750"/>
+  <text x="26" y="90" fill="#b4b4ff" font-size="10">·  write tests</text>
+
+  <rect x="12" y="94" width="256" height="16" fill="#1e1e28"/>
+  <text x="26" y="106" fill="#787896" font-size="10">    └  ·  add unit tests</text>
+
+  <text x="26" y="122" fill="#d2d2e1" font-size="10">·  ship it</text>
+
+  <text x="12" y="144" fill="#3c3c60" font-size="10">──</text>
+  <text x="28" y="144" fill="#9696b9" font-size="10" font-weight="bold">someday</text>
+  <text x="80" y="144" fill="#22223a" font-size="10">───────────────────────────────────────</text>
+
+  <rect x="12" y="150" width="256" height="16" fill="#121e12"/>
+  <text x="26" y="162" fill="#50b950" font-size="10" text-decoration="line-through">✓  learn rust</text>
+
+  <text x="26" y="178" fill="#d2d2e1" font-size="10">·  rewrite everything in rust</text>
+
+  <line x1="12" y1="196" x2="268" y2="196" stroke="#1e1e30" stroke-width="1"/>
+  <text x="12" y="212" fill="#32325a" font-size="9">[a]dd  [e]dit  [space] toggle  [u]ndo  [q]uit</text>
+</svg>
