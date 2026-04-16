@@ -107,21 +107,18 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
                     let name = &app.sections[*si].name;
                     let bg = if is_selected { HIGHLIGHT_BG } else { Color::Reset };
 
-                    let arrow = if is_selected { "▶ " } else { "" };
                     let dashes = "── ";
-                    let used = arrow.len() + dashes.len() + name.len() + 1;
+                    let used = dashes.len() + name.len() + 1;
                     let fill = "─".repeat(available_width.saturating_sub(used));
 
-                    let (arrow_style, dash_style, name_style, fill_style) = if is_selected {
+                    let (dash_style, name_style, fill_style) = if is_selected {
                         (
-                            Style::default().fg(ACCENT).bg(bg),
                             Style::default().fg(ACCENT).bg(bg),
                             Style::default().fg(ACCENT).bg(bg).add_modifier(Modifier::BOLD),
                             Style::default().fg(Color::Rgb(80, 80, 120)).bg(bg),
                         )
                     } else {
                         (
-                            Style::default().fg(Color::Rgb(70, 70, 100)).bg(bg),
                             Style::default().fg(Color::Rgb(60, 60, 90)).bg(bg),
                             Style::default().fg(Color::Rgb(150, 150, 185)).bg(bg).add_modifier(Modifier::BOLD),
                             Style::default().fg(Color::Rgb(45, 45, 70)).bg(bg),
@@ -129,7 +126,6 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
                     };
 
                     let heading_line = Line::from(vec![
-                        Span::styled(arrow, arrow_style),
                         Span::styled(dashes, dash_style),
                         Span::styled(name.clone(), name_style),
                         Span::styled(format!(" {fill}"), fill_style),
@@ -157,9 +153,11 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
                         Color::Reset
                     };
 
-                    let prefix = if is_selected { "▶ " } else if todo.done { "✓ " } else { "· " };
+                    let prefix = if todo.done { "✓ " } else { "· " };
 
-                    let prefix_color = if is_selected {
+                    let prefix_color = if is_selected && todo.done {
+                        Color::Rgb(80, 185, 80)
+                    } else if is_selected {
                         ACCENT
                     } else if todo.done {
                         Color::Rgb(80, 185, 80)
@@ -169,7 +167,9 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
                         Color::Rgb(140, 140, 160)
                     };
 
-                    let text_style = if is_selected {
+                    let text_style = if is_selected && todo.done {
+                        Style::default().fg(Color::Rgb(90, 170, 90)).add_modifier(Modifier::CROSSED_OUT).bg(bg)
+                    } else if is_selected {
                         Style::default().fg(ACCENT).bg(bg)
                     } else if todo.done {
                         Style::default().fg(Color::Rgb(75, 155, 75)).add_modifier(Modifier::CROSSED_OUT).bg(bg)
