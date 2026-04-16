@@ -3,10 +3,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use crate::app::{App, Mode};
+use crate::app::{App, DisplayItem, Mode};
 
 const ZEBRA_DARK: Color = Color::Rgb(30, 30, 40);
 const HIGHLIGHT_BG: Color = Color::Rgb(55, 55, 80);
@@ -14,7 +14,7 @@ const DIM: Color = Color::Rgb(100, 100, 110);
 const ACCENT: Color = Color::Rgb(180, 180, 255);
 const DETAIL_BG: Color = Color::Rgb(10, 8, 22);
 const DONE_BG: Color = Color::Rgb(18, 34, 18);
-const MAX_WIDTH: u16 = 120;
+const MAX_WIDTH: u16 = 140;
 
 pub fn draw(f: &mut Frame, app: &App) {
     let full = f.area();
@@ -31,7 +31,11 @@ pub fn draw(f: &mut Frame, app: &App) {
         .constraints([
             Constraint::Min(0),
             Constraint::Length(match app.mode {
-                Mode::Adding | Mode::AddingSubtask | Mode::Editing => 3,
+                Mode::Adding
+                | Mode::AddingSubtask
+                | Mode::AddingSection
+                | Mode::Editing
+                | Mode::EditingSection => 3,
                 _ => 1,
             }),
         ])
@@ -42,37 +46,37 @@ pub fn draw(f: &mut Frame, app: &App) {
     match app.mode {
         Mode::Adding => draw_input(f, app, chunks[1], "Add todo"),
         Mode::AddingSubtask => draw_input(f, app, chunks[1], "Add subtask"),
+        Mode::AddingSection => draw_input(f, app, chunks[1], "New section"),
         Mode::Editing => draw_input(f, app, chunks[1], "Edit todo"),
+        Mode::EditingSection => draw_input(f, app, chunks[1], "Rename section"),
         _ => draw_footer(f, app, chunks[1]),
     }
 
-    if let Mode::ConfirmDelete = app.mode {
-        draw_confirm_delete(f, app, content_area);
+    match app.mode {
+        Mode::ConfirmDelete => draw_confirm_delete(f, app, content_area),
+        Mode::ConfirmDeleteSection => draw_confirm_delete_section(f, app, content_area),
+        _ => {}
     }
 }
 
 fn draw_list(f: &mut Frame, app: &App, area: Rect) {
     let flat = app.flat_view();
-    let total = flat.len();
-    let done_count = flat.iter().filter(|&&i| app.todos[i].done).count();
+    let todo_count = flat.iter().filter(|i| matches!(i, DisplayItem::Todo(_))).count();
+    let done_count = flat.iter().filter(|i| {
+        if let DisplayItem::Todo(ti) = i { app.todos[*ti].done } else { false }
+    }).count();
 
     let version = env!("CARGO_PKG_VERSION");
-    let title = if total == 0 {
-        Span::styled(
-            format!(" goodo v{version} "),
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-        )
+    let title = if todo_count == 0 {
+        format!(" goodo v{version} ")
     } else {
-        Span::styled(
-            format!(" goodo v{version}  {done_count}/{total} ✓ "),
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-        )
+        format!(" goodo v{version}  {done_count}/{todo_count} ✓ ")
     };
 
     let block = Block::default()
-        .title(title)
+        .title(Span::styled(title, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)))
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+
         .border_style(Style::default().fg(Color::Rgb(60, 60, 90)))
         .style(Style::default().bg(Color::Rgb(18, 18, 28)));
 
@@ -85,155 +89,183 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(DIM),
         ))
         .alignment(Alignment::Center);
-        let centered = Rect {
-            x: inner.x,
-            y: inner.y + inner.height / 2,
-            width: inner.width,
-            height: 1,
-        };
-        f.render_widget(hint, centered);
+        let y = inner.y + inner.height / 2;
+        f.render_widget(hint, Rect { x: inner.x, y, width: inner.width, height: 1 });
         return;
     }
+
+    let available_width = inner.width as usize;
 
     let items: Vec<ListItem> = flat
         .iter()
         .enumerate()
-        .map(|(display_i, &todo_i)| {
-            let todo = &app.todos[todo_i];
+        .map(|(display_i, item)| {
             let is_selected = display_i == app.selected;
-            let is_subtask = todo.parent_id.is_some();
-            let is_odd = display_i % 2 == 1;
 
-            let bg = if is_selected {
-                HIGHLIGHT_BG
-            } else if todo.done {
-                DONE_BG
-            } else if is_odd {
-                ZEBRA_DARK
-            } else {
-                Color::Reset
-            };
+            match item {
+                DisplayItem::SectionHeading(si) => {
+                    let name = &app.sections[*si].name;
+                    let bg = if is_selected { HIGHLIGHT_BG } else { Color::Reset };
 
-            let indent = if is_subtask { "  └ " } else { "" };
+                    let prefix = if is_selected { "▶ " } else { "  " };
+                    let dashes = "── ";
+                    let suffix_start = prefix.len() + dashes.len() + name.len() + 1;
+                    let fill_count = available_width.saturating_sub(suffix_start);
+                    let fill = "─".repeat(fill_count);
 
-            let prefix = if is_selected {
-                "▶ "
-            } else if todo.done {
-                "✓ "
-            } else {
-                "· "
-            };
-
-            let prefix_color = if is_selected {
-                ACCENT
-            } else if todo.done {
-                Color::Rgb(80, 185, 80)
-            } else if is_subtask {
-                Color::Rgb(120, 120, 145)
-            } else {
-                Color::Rgb(140, 140, 160)
-            };
-
-            let text_style = if is_selected {
-                Style::default().fg(ACCENT).bg(bg)
-            } else if todo.done {
-                Style::default()
-                    .fg(Color::Rgb(75, 155, 75))
-                    .add_modifier(Modifier::CROSSED_OUT)
-                    .bg(bg)
-            } else if is_subtask {
-                Style::default().fg(Color::Rgb(185, 185, 205)).bg(bg)
-            } else {
-                Style::default().fg(Color::Rgb(210, 210, 225)).bg(bg)
-            };
-
-            let indent_style = Style::default().fg(Color::Rgb(70, 70, 95)).bg(bg);
-            let prefix_style = Style::default().fg(prefix_color).bg(bg);
-
-            let mut spans = Vec::new();
-            if is_subtask {
-                spans.push(Span::styled(indent, indent_style));
-            }
-            spans.push(Span::styled(prefix, prefix_style));
-            spans.push(Span::styled(todo.text.clone(), text_style));
-
-            if !is_subtask && todo.parent_id.is_none() {
-                let total_sub = app.todos.iter().filter(|t| t.parent_id == Some(todo.id)).count();
-                if total_sub > 0 {
-                    let done_sub = app.todos.iter()
-                        .filter(|t| t.parent_id == Some(todo.id) && t.done)
-                        .count();
-                    let badge_color = if done_sub == total_sub {
-                        Color::Rgb(80, 185, 80)
+                    let (prefix_style, dash_style, name_style, fill_style) = if is_selected {
+                        (
+                            Style::default().fg(ACCENT).bg(bg),
+                            Style::default().fg(ACCENT).bg(bg),
+                            Style::default().fg(ACCENT).bg(bg).add_modifier(Modifier::BOLD),
+                            Style::default().fg(Color::Rgb(80, 80, 120)).bg(bg),
+                        )
                     } else {
-                        Color::Rgb(120, 120, 145)
+                        (
+                            Style::default().fg(Color::Rgb(70, 70, 100)).bg(bg),
+                            Style::default().fg(Color::Rgb(60, 60, 90)).bg(bg),
+                            Style::default().fg(Color::Rgb(150, 150, 185)).bg(bg).add_modifier(Modifier::BOLD),
+                            Style::default().fg(Color::Rgb(45, 45, 70)).bg(bg),
+                        )
                     };
-                    let badge = format!("  ({done_sub}/{total_sub})");
-                    spans.push(Span::styled(badge, Style::default().fg(badge_color).bg(bg)));
+
+                    ListItem::new(Line::from(vec![
+                        Span::styled(prefix, prefix_style),
+                        Span::styled(dashes, dash_style),
+                        Span::styled(name.clone(), name_style),
+                        Span::styled(format!(" {fill}"), fill_style),
+                    ]))
+                }
+
+                DisplayItem::Todo(ti) => {
+                    let todo = &app.todos[*ti];
+                    let is_subtask = todo.parent_id.is_some();
+                    let is_odd = display_i % 2 == 1;
+
+                    let bg = if is_selected {
+                        HIGHLIGHT_BG
+                    } else if todo.done {
+                        DONE_BG
+                    } else if is_odd {
+                        ZEBRA_DARK
+                    } else {
+                        Color::Reset
+                    };
+
+                    let prefix = if is_selected { "▶ " } else if todo.done { "✓ " } else { "· " };
+
+                    let prefix_color = if is_selected {
+                        ACCENT
+                    } else if todo.done {
+                        Color::Rgb(80, 185, 80)
+                    } else if is_subtask {
+                        Color::Rgb(120, 120, 145)
+                    } else {
+                        Color::Rgb(140, 140, 160)
+                    };
+
+                    let text_style = if is_selected {
+                        Style::default().fg(ACCENT).bg(bg)
+                    } else if todo.done {
+                        Style::default().fg(Color::Rgb(75, 155, 75)).add_modifier(Modifier::CROSSED_OUT).bg(bg)
+                    } else if is_subtask {
+                        Style::default().fg(Color::Rgb(185, 185, 205)).bg(bg)
+                    } else {
+                        Style::default().fg(Color::Rgb(210, 210, 225)).bg(bg)
+                    };
+
+                    let mut spans = Vec::new();
+                    if is_subtask {
+                        spans.push(Span::styled("  └ ", Style::default().fg(Color::Rgb(70, 70, 95)).bg(bg)));
+                    }
+                    spans.push(Span::styled(prefix, Style::default().fg(prefix_color).bg(bg)));
+                    spans.push(Span::styled(todo.text.clone(), text_style));
+
+                    if !is_subtask {
+                        let total_sub = app.todos.iter().filter(|t| t.parent_id == Some(todo.id)).count();
+                        if total_sub > 0 {
+                            let done_sub = app.todos.iter()
+                                .filter(|t| t.parent_id == Some(todo.id) && t.done)
+                                .count();
+                            let badge_color = if done_sub == total_sub {
+                                Color::Rgb(80, 185, 80)
+                            } else {
+                                Color::Rgb(120, 120, 145)
+                            };
+                            spans.push(Span::styled(
+                                format!("  ({done_sub}/{total_sub})"),
+                                Style::default().fg(badge_color).bg(bg),
+                            ));
+                        }
+                    }
+
+                    ListItem::new(Line::from(spans))
                 }
             }
-
-            ListItem::new(Line::from(spans))
         })
         .collect();
 
-    let list = List::new(items);
-    f.render_widget(list, inner);
+    f.render_widget(List::new(items), inner);
 }
 
 fn draw_input(f: &mut Frame, app: &App, area: Rect, title: &str) {
     let visible = visible_input(&app.input, app.cursor_pos, area.width.saturating_sub(4) as usize);
-
     let block = Block::default()
-        .title(Span::styled(
-            format!(" {} ", title),
-            Style::default().fg(ACCENT),
-        ))
+        .title(Span::styled(format!(" {title} "), Style::default().fg(ACCENT)))
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+
         .border_style(Style::default().fg(ACCENT))
         .style(Style::default().bg(DETAIL_BG));
-
-    let para = Paragraph::new(visible).block(block);
-    f.render_widget(para, area);
+    f.render_widget(Paragraph::new(visible).block(block), area);
 }
 
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    let has_todos = !app.flat_view().is_empty();
-    let selected_is_top_level = app.selected_todo_idx()
+    let on_section = app.selected_section_idx().is_some();
+    let selected_is_top = app.selected_todo_idx()
         .map(|i| app.todos[i].parent_id.is_none())
         .unwrap_or(false);
 
     let s = Style::default();
     let key = |k: &'static str| Span::styled(k, s.fg(ACCENT).add_modifier(Modifier::BOLD));
-    let label = |l: &'static str| Span::styled(l, s.fg(DIM));
+    let lbl = |l: &'static str| Span::styled(l, s.fg(DIM));
 
-    let hints: Vec<Span> = if !has_todos {
-        vec![key("[a]"), label("dd  "), key("[q]"), label("uit")]
-    } else if selected_is_top_level {
+    let hints: Vec<Span> = if on_section {
         vec![
-            key("[a]"), label("dd  "),
-            key("[A]"), label(" subtask  "),
-            key("[e]"), label("dit  "),
-            key("[J/K]"), label(" move  "),
-            key("[tab]"), label(" indent  "),
-            key("[space]"), label(" toggle  "),
-            key("[x]"), label("/"), key("[d]"), label("el  "),
-            key("[u]"), label("ndo  "),
-            key("[r]"), label("edo  "),
-            key("[q]"), label("uit"),
+            key("[a]"), lbl("dd  "),
+            key("[n]"), lbl("ew section  "),
+            key("[e]"), lbl("dit  "),
+            key("[d]"), lbl("el  "),
+            key("[J/K]"), lbl(" move  "),
+            key("[u]"), lbl("ndo  "),
+            key("[r]"), lbl("edo  "),
+            key("[q]"), lbl("uit"),
+        ]
+    } else if selected_is_top {
+        vec![
+            key("[a]"), lbl("dd  "),
+            key("[A]"), lbl(" subtask  "),
+            key("[n]"), lbl(" section  "),
+            key("[e]"), lbl("dit  "),
+            key("[J/K]"), lbl(" move  "),
+            key("[tab]"), lbl(" indent  "),
+            key("[spc]"), lbl(" toggle  "),
+            key("[x]"), lbl("/"), key("[d]"), lbl("el  "),
+            key("[u]"), lbl("ndo  "),
+            key("[r]"), lbl("edo  "),
+            key("[q]"), lbl("uit"),
         ]
     } else {
         vec![
-            key("[a]"), label("dd  "),
-            key("[e]"), label("dit  "),
-            key("[J/K]"), label(" move  "),
-            key("[tab]"), label(" dedent  "),
-            key("[space]"), label(" toggle  "),
-            key("[x]"), label("/"), key("[d]"), label("el  "),
-            key("[u]"), label("ndo  "),
-            key("[r]"), label("edo  "),
-            key("[q]"), label("uit"),
+            key("[a]"), lbl("dd  "),
+            key("[n]"), lbl(" section  "),
+            key("[e]"), lbl("dit  "),
+            key("[J/K]"), lbl(" move  "),
+            key("[tab]"), lbl(" dedent  "),
+            key("[spc]"), lbl(" toggle  "),
+            key("[x]"), lbl("/"), key("[d]"), lbl("el  "),
+            key("[u]"), lbl("ndo  "),
+            key("[r]"), lbl("edo  "),
+            key("[q]"), lbl("uit"),
         ]
     };
 
@@ -249,7 +281,19 @@ fn draw_confirm_delete(f: &mut Frame, app: &App, area: Rect) {
     let has_children = app.todos.iter().any(|t| t.parent_id == Some(todo.id));
     let extra = if has_children { " + subtasks" } else { "" };
     let text = format!(" Delete \"{}\"{extra}? [y]es / [n]o ", todo.text);
+    draw_modal(f, area, &text, Color::Rgb(200, 80, 80));
+}
 
+fn draw_confirm_delete_section(f: &mut Frame, app: &App, area: Rect) {
+    let Some(si) = app.selected_section_idx() else { return };
+    let section = &app.sections[si];
+    let count = app.todos.iter().filter(|t| t.section_id == section.id).count();
+    let extra = if count > 0 { format!(" + {count} todos") } else { String::new() };
+    let text = format!(" Delete section \"{}\"{extra}? [y]es / [n]o ", section.name);
+    draw_modal(f, area, &text, Color::Rgb(200, 80, 80));
+}
+
+fn draw_modal(f: &mut Frame, area: Rect, text: &str, border_color: Color) {
     let width = (text.chars().count() as u16 + 4).min(area.width.saturating_sub(4));
     let height = 3u16;
     let x = area.x + (area.width.saturating_sub(width)) / 2;
@@ -267,22 +311,18 @@ fn draw_confirm_delete(f: &mut Frame, app: &App, area: Rect) {
     }
 
     f.render_widget(Clear, modal_area);
-
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Rgb(200, 80, 80)))
-        .style(Style::default().bg(DETAIL_BG));
 
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(DETAIL_BG));
     let inner = block.inner(modal_area);
     f.render_widget(block, modal_area);
-
-    let para = Paragraph::new(Span::styled(
-        text,
-        Style::default().fg(Color::Rgb(220, 200, 200)),
-    ))
-    .alignment(Alignment::Center);
-    f.render_widget(para, inner);
+    f.render_widget(
+        Paragraph::new(Span::styled(text.to_owned(), Style::default().fg(Color::Rgb(220, 200, 200))))
+            .alignment(Alignment::Center),
+        inner,
+    );
 }
 
 fn visible_input(input: &str, cursor_pos: usize, max_width: usize) -> Line<'static> {
@@ -292,8 +332,8 @@ fn visible_input(input: &str, cursor_pos: usize, max_width: usize) -> Line<'stat
     let (start, display_cursor) = if cursor_pos <= max_width.saturating_sub(1) {
         (0, cursor_pos)
     } else {
-        let start = cursor_pos.saturating_sub(max_width.saturating_sub(1));
-        (start, max_width.saturating_sub(1))
+        let s = cursor_pos.saturating_sub(max_width.saturating_sub(1));
+        (s, max_width.saturating_sub(1))
     };
 
     let visible: String = chars[start..len.min(start + max_width)].iter().collect();
@@ -303,7 +343,6 @@ fn visible_input(input: &str, cursor_pos: usize, max_width: usize) -> Line<'stat
         let before: String = visible.chars().take(display_cursor).collect();
         let at: String = visible.chars().nth(display_cursor).map(|c| c.to_string()).unwrap_or_default();
         let after: String = visible.chars().skip(display_cursor + 1).collect();
-
         spans.push(Span::styled(before, Style::default().fg(Color::Rgb(210, 210, 225))));
         spans.push(Span::styled(at, Style::default().fg(Color::Black).bg(ACCENT)));
         spans.push(Span::styled(after, Style::default().fg(Color::Rgb(210, 210, 225))));

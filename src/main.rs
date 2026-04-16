@@ -25,20 +25,13 @@ fn main() -> io::Result<()> {
     let result = run(&mut terminal, &mut app);
 
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
 
     result
 }
 
-fn run<B: ratatui::backend::Backend>(
-    terminal: &mut Terminal<B>,
-    app: &mut App,
-) -> io::Result<()> {
+fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {
     loop {
         terminal.draw(|f| ui::draw(f, app))?;
 
@@ -61,7 +54,14 @@ fn run<B: ratatui::backend::Backend>(
                     KeyCode::BackTab => app.unindent(),
                     KeyCode::Char('a') => app.start_adding(),
                     KeyCode::Char('A') => app.start_adding_subtask(),
-                    KeyCode::Char('e') => app.start_editing(),
+                    KeyCode::Char('n') => app.start_adding_section(),
+                    KeyCode::Char('e') => {
+                        if app.selected_section_idx().is_some() {
+                            app.start_editing_section();
+                        } else {
+                            app.start_editing();
+                        }
+                    }
                     KeyCode::Char(' ') | KeyCode::Enter => app.toggle_done(),
                     KeyCode::Char('x') => app.quick_delete(),
                     KeyCode::Char('d') => app.start_delete(),
@@ -69,8 +69,13 @@ fn run<B: ratatui::backend::Backend>(
                     KeyCode::Char('r') => app.redo(),
                     _ => {}
                 },
-                Mode::Adding | Mode::AddingSubtask => match key.code {
-                    KeyCode::Enter => app.confirm_add(),
+                Mode::Adding | Mode::AddingSubtask | Mode::AddingSection => match key.code {
+                    KeyCode::Enter => {
+                        match app.mode {
+                            Mode::AddingSection => app.confirm_add_section(),
+                            _ => app.confirm_add(),
+                        }
+                    }
                     KeyCode::Esc => app.cancel_input(),
                     KeyCode::Backspace => app.input_backspace(),
                     KeyCode::Left => app.input_move_left(),
@@ -78,8 +83,13 @@ fn run<B: ratatui::backend::Backend>(
                     KeyCode::Char(c) => app.input_insert_char(c),
                     _ => {}
                 },
-                Mode::Editing => match key.code {
-                    KeyCode::Enter => app.confirm_edit(),
+                Mode::Editing | Mode::EditingSection => match key.code {
+                    KeyCode::Enter => {
+                        match app.mode {
+                            Mode::EditingSection => app.confirm_edit_section(),
+                            _ => app.confirm_edit(),
+                        }
+                    }
                     KeyCode::Esc => app.cancel_input(),
                     KeyCode::Backspace => app.input_backspace(),
                     KeyCode::Left => app.input_move_left(),
@@ -89,6 +99,11 @@ fn run<B: ratatui::backend::Backend>(
                 },
                 Mode::ConfirmDelete => match key.code {
                     KeyCode::Char('y') | KeyCode::Enter => app.confirm_delete(),
+                    KeyCode::Char('n') | KeyCode::Esc => app.mode = Mode::Normal,
+                    _ => {}
+                },
+                Mode::ConfirmDeleteSection => match key.code {
+                    KeyCode::Char('y') | KeyCode::Enter => app.confirm_delete_section(),
                     KeyCode::Char('n') | KeyCode::Esc => app.mode = Mode::Normal,
                     _ => {}
                 },
