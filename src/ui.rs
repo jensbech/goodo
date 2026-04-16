@@ -107,13 +107,12 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
                     let name = &app.sections[*si].name;
                     let bg = if is_selected { HIGHLIGHT_BG } else { Color::Reset };
 
-                    let prefix = if is_selected { "▶ " } else { "  " };
+                    let arrow = if is_selected { "▶ " } else { "" };
                     let dashes = "── ";
-                    let suffix_start = prefix.len() + dashes.len() + name.len() + 1;
-                    let fill_count = available_width.saturating_sub(suffix_start);
-                    let fill = "─".repeat(fill_count);
+                    let used = arrow.len() + dashes.len() + name.len() + 1;
+                    let fill = "─".repeat(available_width.saturating_sub(used));
 
-                    let (prefix_style, dash_style, name_style, fill_style) = if is_selected {
+                    let (arrow_style, dash_style, name_style, fill_style) = if is_selected {
                         (
                             Style::default().fg(ACCENT).bg(bg),
                             Style::default().fg(ACCENT).bg(bg),
@@ -129,12 +128,18 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
                         )
                     };
 
-                    ListItem::new(Line::from(vec![
-                        Span::styled(prefix, prefix_style),
+                    let heading_line = Line::from(vec![
+                        Span::styled(arrow, arrow_style),
                         Span::styled(dashes, dash_style),
                         Span::styled(name.clone(), name_style),
                         Span::styled(format!(" {fill}"), fill_style),
-                    ]))
+                    ]);
+
+                    if display_i == 0 {
+                        ListItem::new(heading_line)
+                    } else {
+                        ListItem::new(vec![Line::from(""), heading_line])
+                    }
                 }
 
                 DisplayItem::Todo(ti) => {
@@ -174,9 +179,12 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
                         Style::default().fg(Color::Rgb(210, 210, 225)).bg(bg)
                     };
 
+                    let indent = Style::default().bg(bg);
                     let mut spans = Vec::new();
                     if is_subtask {
-                        spans.push(Span::styled("  └ ", Style::default().fg(Color::Rgb(70, 70, 95)).bg(bg)));
+                        spans.push(Span::styled("    └ ", Style::default().fg(Color::Rgb(70, 70, 95)).bg(bg)));
+                    } else {
+                        spans.push(Span::styled("  ", indent));
                     }
                     spans.push(Span::styled(prefix, Style::default().fg(prefix_color).bg(bg)));
                     spans.push(Span::styled(todo.text.clone(), text_style));
