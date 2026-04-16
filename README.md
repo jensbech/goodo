@@ -4,7 +4,7 @@
   <img src="logo.svg" alt="goodo" width="280" />
 </p>
 
-A fast, keyboard-driven todo app that lives in your terminal. Add tasks, break them into subtasks, check things off, and reorder on the fly — all without leaving the command line.
+A fast, keyboard-driven todo app that lives in your terminal. Add tasks, break them into subtasks, check things off, and reorder on the fly.
 
 ## Install
 
