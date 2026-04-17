@@ -6,7 +6,8 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use crate::app::{App, DisplayItem, Mode};
+use crate::app::{App, DisplayItem, Mode, Priority};
+use crate::date::{DueStatus, format_due};
 
 const ZEBRA_DARK: Color = Color::Rgb(30, 30, 40);
 const HIGHLIGHT_BG: Color = Color::Rgb(55, 55, 80);
@@ -35,7 +36,9 @@ pub fn draw(f: &mut Frame, app: &App) {
                 | Mode::AddingSubtask
                 | Mode::AddingSection
                 | Mode::Editing
-                | Mode::EditingSection => 3,
+                | Mode::EditingSection
+                | Mode::Searching
+                | Mode::SettingDue => 3,
                 _ => 1,
             }),
         ])
@@ -49,6 +52,8 @@ pub fn draw(f: &mut Frame, app: &App) {
         Mode::AddingSection => draw_input(f, app, chunks[1], "New section"),
         Mode::Editing => draw_input(f, app, chunks[1], "Edit todo"),
         Mode::EditingSection => draw_input(f, app, chunks[1], "Rename section"),
+        Mode::Searching => draw_input(f, app, chunks[1], "Search (Enter to keep, Esc to clear)"),
+        Mode::SettingDue => draw_input(f, app, chunks[1], "Due: YYYY-MM-DD | today | tomorrow | +N | mon..sun | (empty to clear)"),
         _ => draw_footer(f, app, chunks[1]),
     }
 
@@ -67,10 +72,21 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
     }).count();
 
     let version = env!("CARGO_PKG_VERSION");
-    let title = if todo_count == 0 {
-        format!(" goodo v{version} ")
+    let filter_display: Option<String> = match app.mode {
+        Mode::Searching => {
+            let s = app.input.trim();
+            if s.is_empty() { None } else { Some(s.to_string()) }
+        }
+        _ => app.search.clone().filter(|s| !s.trim().is_empty()),
+    };
+    let counts = if todo_count == 0 {
+        String::new()
     } else {
-        format!(" goodo v{version}  {done_count}/{todo_count} ✓ ")
+        format!("  {done_count}/{todo_count} ✓")
+    };
+    let title = match &filter_display {
+        Some(f) => format!(" goodo v{version}  filter: \"{f}\"{counts} "),
+        None => format!(" goodo v{version}{counts} "),
     };
 
     let block = Block::default()
@@ -142,6 +158,7 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
                     let todo = &app.todos[*ti];
                     let is_subtask = todo.parent_id.is_some();
                     let is_odd = display_i % 2 == 1;
+                    let is_high = matches!(todo.priority, Some(Priority::High));
 
                     let bg = if is_selected {
                         HIGHLIGHT_BG
@@ -153,14 +170,20 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
                         Color::Reset
                     };
 
-                    let prefix = if todo.done { "✓ " } else { "· " };
+                    let prefix = if todo.done {
+                        "✓ "
+                    } else if is_high {
+                        "! "
+                    } else {
+                        "· "
+                    };
 
-                    let prefix_color = if is_selected && todo.done {
+                    let prefix_color = if todo.done {
                         Color::Rgb(80, 185, 80)
+                    } else if is_high {
+                        Color::Rgb(230, 95, 95)
                     } else if is_selected {
                         ACCENT
-                    } else if todo.done {
-                        Color::Rgb(80, 185, 80)
                     } else if is_subtask {
                         Color::Rgb(120, 120, 145)
                     } else {
@@ -207,6 +230,24 @@ fn draw_list(f: &mut Frame, app: &App, area: Rect) {
                         }
                     }
 
+                    if let Some(due) = &todo.due {
+                        let (text, status) = format_due(due);
+                        let color = if todo.done {
+                            Color::Rgb(90, 110, 90)
+                        } else {
+                            match status {
+                                DueStatus::Overdue => Color::Rgb(230, 95, 95),
+                                DueStatus::Today => Color::Rgb(235, 205, 90),
+                                DueStatus::Soon => Color::Rgb(130, 185, 225),
+                                DueStatus::Neutral => Color::Rgb(130, 130, 155),
+                            }
+                        };
+                        spans.push(Span::styled(
+                            format!("  {text}"),
+                            Style::default().fg(color).bg(bg),
+                        ));
+                    }
+
                     ListItem::new(Line::from(spans))
                 }
             }
@@ -244,35 +285,36 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             key("[e]"), lbl("dit  "),
             key("[d]"), lbl("el  "),
             key("[J/K]"), lbl(" move  "),
+            key("[/]"), lbl(" search  "),
             key("[u]"), lbl("ndo  "),
-            key("[r]"), lbl("edo  "),
             key("[q]"), lbl("uit"),
         ]
     } else if selected_is_top {
         vec![
             key("[a]"), lbl("dd  "),
-            key("[A]"), lbl(" subtask  "),
+            key("[A]"), lbl(" sub  "),
             key("[n]"), lbl(" section  "),
             key("[e]"), lbl("dit  "),
-            key("[J/K]"), lbl(" move  "),
+            key("[p]"), lbl("ri  "),
+            key("[D]"), lbl("ue  "),
+            key("[/]"), lbl(" search  "),
             key("[tab]"), lbl(" indent  "),
             key("[spc]"), lbl(" toggle  "),
             key("[x]"), lbl("/"), key("[d]"), lbl("el  "),
             key("[u]"), lbl("ndo  "),
-            key("[r]"), lbl("edo  "),
             key("[q]"), lbl("uit"),
         ]
     } else {
         vec![
             key("[a]"), lbl("dd  "),
-            key("[n]"), lbl(" section  "),
             key("[e]"), lbl("dit  "),
-            key("[J/K]"), lbl(" move  "),
-            key("[tab]"), lbl(" dedent  "),
+            key("[p]"), lbl("ri  "),
+            key("[D]"), lbl("ue  "),
+            key("[/]"), lbl(" search  "),
+            key("[S-tab]"), lbl(" dedent  "),
             key("[spc]"), lbl(" toggle  "),
             key("[x]"), lbl("/"), key("[d]"), lbl("el  "),
             key("[u]"), lbl("ndo  "),
-            key("[r]"), lbl("edo  "),
             key("[q]"), lbl("uit"),
         ]
     };

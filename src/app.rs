@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::storage;
@@ -10,6 +12,11 @@ pub struct Section {
 
 fn default_section_id() -> u64 { 1 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
+pub enum Priority {
+    High,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Todo {
     pub id: u64,
@@ -18,6 +25,10 @@ pub struct Todo {
     pub parent_id: Option<u64>,
     #[serde(default = "default_section_id")]
     pub section_id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<Priority>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due: Option<String>,
 }
 
 #[derive(Clone)]
@@ -35,6 +46,8 @@ pub enum Mode {
     EditingSection,
     ConfirmDelete,
     ConfirmDeleteSection,
+    Searching,
+    SettingDue,
 }
 
 struct Snapshot {
@@ -54,6 +67,7 @@ pub struct App {
     pub next_section_id: u64,
     pub adding_parent_id: Option<u64>,
     pub adding_section_id: u64,
+    pub search: Option<String>,
     undo_stack: Vec<Snapshot>,
     redo_stack: Vec<Snapshot>,
 }
@@ -75,6 +89,7 @@ impl App {
             next_section_id,
             adding_parent_id: None,
             adding_section_id: default_sid,
+            search: None,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
         }
@@ -124,7 +139,22 @@ impl App {
         }
     }
 
+    pub fn active_filter(&self) -> Option<String> {
+        let raw: &str = match self.mode {
+            Mode::Searching => self.input.trim(),
+            _ => self.search.as_deref().map(|s| s.trim()).unwrap_or(""),
+        };
+        if raw.is_empty() { None } else { Some(raw.to_lowercase()) }
+    }
+
     pub fn flat_view(&self) -> Vec<DisplayItem> {
+        match self.active_filter() {
+            Some(q) => self.flat_view_filtered(&q),
+            None => self.flat_view_unfiltered(),
+        }
+    }
+
+    fn flat_view_unfiltered(&self) -> Vec<DisplayItem> {
         let mut result = Vec::new();
         for (si, section) in self.sections.iter().enumerate() {
             result.push(DisplayItem::SectionHeading(si));
@@ -142,8 +172,49 @@ impl App {
         result
     }
 
+    fn flat_view_filtered(&self, q: &str) -> Vec<DisplayItem> {
+        let direct: Vec<u64> = self.todos.iter()
+            .filter(|t| t.text.to_lowercase().contains(q))
+            .map(|t| t.id)
+            .collect();
+        let mut expanded: HashSet<u64> = direct.iter().copied().collect();
+        for id in &direct {
+            let Some(t) = self.todos.iter().find(|t| t.id == *id) else { continue };
+            match t.parent_id {
+                Some(pid) => { expanded.insert(pid); }
+                None => {
+                    for c in &self.todos {
+                        if c.parent_id == Some(*id) {
+                            expanded.insert(c.id);
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut result = Vec::new();
+        for (si, section) in self.sections.iter().enumerate() {
+            let has_match = self.todos.iter()
+                .any(|t| t.section_id == section.id && expanded.contains(&t.id));
+            if !has_match { continue; }
+
+            result.push(DisplayItem::SectionHeading(si));
+            for (ti, todo) in self.todos.iter().enumerate() {
+                if todo.section_id != section.id || todo.parent_id.is_some() { continue; }
+                if !expanded.contains(&todo.id) { continue; }
+                result.push(DisplayItem::Todo(ti));
+                for (ci, child) in self.todos.iter().enumerate() {
+                    if child.parent_id == Some(todo.id) && expanded.contains(&child.id) {
+                        result.push(DisplayItem::Todo(ci));
+                    }
+                }
+            }
+        }
+        result
+    }
+
     fn all_todos_display_order(&self) -> Vec<usize> {
-        self.flat_view().into_iter().filter_map(|item| {
+        self.flat_view_unfiltered().into_iter().filter_map(|item| {
             if let DisplayItem::Todo(i) = item { Some(i) } else { None }
         }).collect()
     }
@@ -202,6 +273,7 @@ impl App {
     }
 
     pub fn move_item_up(&mut self) {
+        if self.active_filter().is_some() { return; }
         let flat = self.flat_view();
         if self.selected == 0 || flat.is_empty() { return; }
 
@@ -259,6 +331,7 @@ impl App {
     }
 
     pub fn move_item_down(&mut self) {
+        if self.active_filter().is_some() { return; }
         let flat = self.flat_view();
         if flat.is_empty() || self.selected >= flat.len() - 1 { return; }
 
@@ -402,6 +475,8 @@ impl App {
                 done: false,
                 parent_id: self.adding_parent_id,
                 section_id: self.adding_section_id,
+                priority: None,
+                due: None,
             });
             self.selected = self.find_todo_in_flat(id).unwrap_or(self.selected);
             self.save();
@@ -580,5 +655,85 @@ impl App {
 
     pub fn input_move_right(&mut self) {
         if self.cursor_pos < self.input.chars().count() { self.cursor_pos += 1; }
+    }
+
+    pub fn cycle_priority(&mut self) {
+        let Some(idx) = self.selected_todo_idx() else { return };
+        self.snapshot();
+        self.todos[idx].priority = match self.todos[idx].priority {
+            None => Some(Priority::High),
+            Some(Priority::High) => None,
+        };
+        self.save();
+    }
+
+    pub fn start_setting_due(&mut self) {
+        let Some(idx) = self.selected_todo_idx() else { return };
+        self.input = self.todos[idx].due.clone().unwrap_or_default();
+        self.cursor_pos = self.input.chars().count();
+        self.mode = Mode::SettingDue;
+    }
+
+    pub fn confirm_due(&mut self) {
+        if let Some(idx) = self.selected_todo_idx() {
+            let trimmed = self.input.trim();
+            let new_value: Option<Option<String>> = if trimmed.is_empty() {
+                Some(None)
+            } else {
+                crate::date::parse_date(trimmed).map(Some)
+            };
+            if let Some(v) = new_value {
+                self.snapshot();
+                self.todos[idx].due = v;
+                self.save();
+            }
+        }
+        self.mode = Mode::Normal;
+        self.input.clear();
+        self.cursor_pos = 0;
+    }
+
+    pub fn start_search(&mut self) {
+        self.input = self.search.clone().unwrap_or_default();
+        self.cursor_pos = self.input.chars().count();
+        self.mode = Mode::Searching;
+        self.selected = 0;
+    }
+
+    pub fn confirm_search(&mut self) {
+        let q = self.input.trim().to_string();
+        self.search = if q.is_empty() { None } else { Some(q) };
+        self.mode = Mode::Normal;
+        self.input.clear();
+        self.cursor_pos = 0;
+        self.selected = 0;
+    }
+
+    pub fn cancel_search(&mut self) {
+        self.search = None;
+        self.mode = Mode::Normal;
+        self.input.clear();
+        self.cursor_pos = 0;
+        self.selected = 0;
+    }
+
+    pub fn clear_search(&mut self) -> bool {
+        if self.search.is_some() {
+            self.search = None;
+            self.selected = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn search_input_char(&mut self, c: char) {
+        self.input_insert_char(c);
+        self.selected = 0;
+    }
+
+    pub fn search_input_backspace(&mut self) {
+        self.input_backspace();
+        self.selected = 0;
     }
 }

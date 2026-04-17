@@ -1,4 +1,5 @@
 mod app;
+mod date;
 mod storage;
 mod ui;
 
@@ -44,6 +45,7 @@ fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) 
                 Mode::Normal => match key.code {
                     KeyCode::Char('q') => break,
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                    KeyCode::Esc => { app.clear_search(); }
                     KeyCode::Char('j') | KeyCode::Down => app.move_down(),
                     KeyCode::Char('k') | KeyCode::Up => app.move_up(),
                     KeyCode::Char('J') => app.move_item_down(),
@@ -67,6 +69,9 @@ fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) 
                     KeyCode::Char('d') => app.start_delete(),
                     KeyCode::Char('u') => app.undo(),
                     KeyCode::Char('r') => app.redo(),
+                    KeyCode::Char('/') => app.start_search(),
+                    KeyCode::Char('p') => app.cycle_priority(),
+                    KeyCode::Char('D') => app.start_setting_due(),
                     _ => {}
                 },
                 Mode::Adding | Mode::AddingSubtask | Mode::AddingSection => match key.code {
@@ -105,6 +110,24 @@ fn run<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>, app: &mut App) 
                 Mode::ConfirmDeleteSection => match key.code {
                     KeyCode::Char('y') | KeyCode::Enter => app.confirm_delete_section(),
                     KeyCode::Char('n') | KeyCode::Esc => app.mode = Mode::Normal,
+                    _ => {}
+                },
+                Mode::Searching => match key.code {
+                    KeyCode::Enter => app.confirm_search(),
+                    KeyCode::Esc => app.cancel_search(),
+                    KeyCode::Backspace => app.search_input_backspace(),
+                    KeyCode::Left => app.input_move_left(),
+                    KeyCode::Right => app.input_move_right(),
+                    KeyCode::Char(c) => app.search_input_char(c),
+                    _ => {}
+                },
+                Mode::SettingDue => match key.code {
+                    KeyCode::Enter => app.confirm_due(),
+                    KeyCode::Esc => app.cancel_input(),
+                    KeyCode::Backspace => app.input_backspace(),
+                    KeyCode::Left => app.input_move_left(),
+                    KeyCode::Right => app.input_move_right(),
+                    KeyCode::Char(c) => app.input_insert_char(c),
                     _ => {}
                 },
             }
